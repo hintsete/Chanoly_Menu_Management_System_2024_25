@@ -1,51 +1,34 @@
-import { MiddlewareConsumer, Module, NestModule, RequestMethod } from '@nestjs/common';
-import { AppController } from './app.controller';
-import { AppService } from './app.service';
-import { ConfigModule, ConfigService } from '@nestjs/config';
+import { Module } from '@nestjs/common';
 import { TypeOrmModule } from '@nestjs/typeorm';
-import { join } from 'path';
-import { UserModule } from './user/user.module';
+import { ConfigModule, ConfigService } from '@nestjs/config';
 import { AuthModule } from './auth/auth.module';
-import { AuthMiddleware } from './auth/auth.middleware';
-import { MenuItemsModule } from './menu_items/menu_items.module';
+import { MenuModule } from './menu/menu.module';
+import { User } from './auth/entities/user.entity';
+import { MenuItem } from './menu/entities/menu-item.entity';
+import { env } from './common/utils/envConfig';
 
 @Module({
   imports: [
-    ConfigModule.forRoot(),
+    ConfigModule.forRoot({
+      isGlobal: true,
+      validate: () => env,
+    }),
     TypeOrmModule.forRootAsync({
       imports: [ConfigModule],
-      inject: [ConfigService],
-      useFactory: (configService: ConfigService) => ({
+      useFactory: () => ({
         type: 'postgres',
-        host: configService.get('DB_HOST'),
-        port: +configService.get('DB_PORT'),
-        username: configService.get('DB_USERNAME'),
-        password: configService.get('DB_PASSWORD'),
-        database: configService.get('DB_NAME'),
-        entities: [join(process.cwd(), 'dist/**/*.entity.js')],
-        synchronize: true,
-        logging: false,
+        host: env.DB_HOST,
+        port: env.DB_PORT,
+        username: env.DB_USER,
+        password: env.DB_PASS,
+        database: env.DB_NAME,
+        entities: [User, MenuItem],
+        synchronize: true, // Set to false in production
       }),
+      inject: [ConfigService],
     }),
-    UserModule,
     AuthModule,
-    MenuItemsModule,
+    MenuModule,
   ],
-  controllers: [AppController],
-  providers: [AppService],
 })
-// export class AppModule implements NestModule {
-//   configure(consumer: MiddlewareConsumer) {
-//     consumer
-//       .apply(AuthMiddleware)
-//       .exclude({ path: '/user/signup', method: RequestMethod.POST })
-//       .forRoutes({ path: '*', method: RequestMethod.ALL });
-//   }
-// }
-export class AppModule implements NestModule {
-  configure(consumer: MiddlewareConsumer) {
-    consumer
-      .apply(AuthMiddleware)
-      .forRoutes({ path: '/user/login', method: RequestMethod.POST }); 
-  }
-}
+export class AppModule {}

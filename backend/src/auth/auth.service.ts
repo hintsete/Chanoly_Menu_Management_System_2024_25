@@ -1,72 +1,88 @@
-import { ConflictException, Injectable, UnauthorizedException } from '@nestjs/common';
+import { Injectable, UnauthorizedException } from '@nestjs/common';
+import { JwtService } from '@nestjs/jwt';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
-import {User} from '../user/entities/user.entity';
 import * as bcrypt from 'bcrypt';
-import { UserService } from 'src/user/user.service';
-import { JwtService } from '@nestjs/jwt';
-import { SignUpDto } from './dto/signup.dto';
-import { LoginDto } from './dto/login.dto';
+import { User } from './entities/user.entity';
+import {
+  JwtPayload,
+  LoginResponse,
+  TokenResponse,
+} from '../auth/types/auth.types';
+import { env } from 'src/common/utils/envConfig';
 
 @Injectable()
 export class AuthService {
   constructor(
     @InjectRepository(User)
-    private usersRepository: Repository<User>,
+    private userRepository: Repository<User>,
     private jwtService: JwtService,
   ) {}
 
-  async signUp(
-    signUpDto: SignUpDto,
-  ): Promise<{ token: string; message: string }> {
-    const { username, email, password } = signUpDto;
-
-    const existingUser = await this.usersRepository.findOne({
-      where: [{ email }, { username }],
-    });
-
-    if (existingUser) {
-      throw new ConflictException(
-        'User with this email or username already exists',
-      );
-    }
+  async register(
+    email: string,
+    password: string,
+    name: string,
+  ): Promise<{
+    access_token: string;
+    email: string;
+    name: string;
+    roles: string[];
+  }> {
     const hashedPassword = await bcrypt.hash(password, 10);
-
-    const user = this.usersRepository.create({
-      username,
+    const user = this.userRepository.create({
       email,
       password: hashedPassword,
+      name,
+      roles: ['user'],
     });
 
-    await this.usersRepository.save(user);
-
-    const token = this.jwtService.sign({ id: user.id });
-
+    await this.userRepository.save(user);
+    const { password: _, ...result } = user;
+    const payload: JwtPayload = {
+      sub: user.id,
+      email: user.email,
+      roles: user.roles,
+    };
+    const token = await this.jwtService.signAsync(payload, {
+      secret: env.JWT_SECRET,
+    });
     return {
-      token,
-      message: 'User registered successfully',
+      ...result,
+      access_token: token,
     };
   }
 
-  async login(loginDto: LoginDto): Promise<{ token: string; message: string }> {
-    const { email, password } = loginDto;
-
-    const user = await this.usersRepository.findOne({
-      where: { email },
-    });
-
+  async login(email: string, password: string): Promise<LoginResponse> {
+    const user = await this.userRepository.findOne({ where: { email } });
     if (!user) {
-      throw new UnauthorizedException('Invalid email or password');
+      throw new UnauthorizedException('Invalid credentials');
     }
 
-    const isPasswordMatched = await bcrypt.compare(password, user.password);
-
-    if (!isPasswordMatched) {
-      throw new UnauthorizedException('Invalid email or password');
+    const isPasswordValid = await bcrypt.compare(password, user.password);
+    if (!isPasswordValid) {
+      throw new UnauthorizedException('Invalid credentials');
     }
 
-    const token = this.jwtService.sign({ id: user.id });
+    const payload: JwtPayload = {
+      sub: user.id,
+      email: user.email,
+      roles: user.roles,
+    };
 
-    return { token, message: 'user logged in successfully.' };
+    return {
+      user: {
+        email: user.email,
+        name: user.name,
+        roles: user.roles,
+      },
+      access_token: await this.jwtService.signAsync(payload, {
+        secret: env.JWT_SECRET,
+      }),
+    };
+  }
+
+  async validateUser(payload: JwtPayload): Promise<User> {
+    return this.userRepository.findOne({ where: { id: payload.sub } });
   }
 }
